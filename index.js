@@ -4,6 +4,7 @@ const express = require('express');
 const path = require('path');
 const { createServer } = require('http');
 const WebSocket = require('ws');
+const {request} = require('express');
 const app = express();
 app.use(express.static(path.join(__dirname, '/public')));
 const server = createServer(app);
@@ -15,7 +16,9 @@ let game= {
     'channels': {
         //Default test server
         '34' : {
-            'players': []
+            'atcs': [],
+            'players': [],
+            'obstacles': []
         }
     }
 };
@@ -35,6 +38,27 @@ wss.on('connection', function (client) {
 
     //Let's use a switch to execute a function according to the request
     switch (data.request) {
+        case 'atc':
+            //Check if the channel exists
+            if(game.channels[data.channel]){
+                //Store the uuid and channel to future use
+                client.uuid=data.uuid;
+                client.channel=data.channel;
+
+                //Now add the ATC to the channel
+                game.channels[data.channel].atcs.push({
+                    'uuid':data.uuid,
+                    'role':data.role,
+                    'player_name':data.player_name
+                });
+
+                //Let's confirm the data by returning the list of players
+                client.send(JSON.stringify({
+                    request: 'game_update',
+                    players: game.channels[data.channel].players
+                }));
+            }
+        break;
         case 'register':
             //Check if the channel exists
             if(game.channels[data.channel]){
@@ -42,11 +66,15 @@ wss.on('connection', function (client) {
                 client.uuid=data.uuid;
                 client.channel=data.channel;
 
-                //Now register the player by adding the uuid and role to the channel
-                game.channels[data.channel].players.push({
-                    'uuid':data.uuid,
-                    'role':data.role
-                });
+                //Now register the player by adding the uuid and role to the channel, if role is pilot
+                if(data.role=='pilot'){
+                    game.channels[data.channel].players.push({
+                        'uuid':data.uuid,
+                        'role':data.role,
+                        'player_name':data.player_name
+                    });
+                }
+
 
                 //Let's confirm the data
                 client.send(JSON.stringify({result:'success',msg:'admtrainer_client_registered'}));
@@ -65,6 +93,45 @@ wss.on('connection', function (client) {
                     player.color=data.color;
                 }
             });
+            //Now return to the new client the list of players
+            client.send(JSON.stringify({
+                request: 'game_update',
+                players: game.channels[data.channel].players
+            }));
+
+            //Also send the list of obstacles
+            client.send(JSON.stringify({
+                request: 'obstacle_update',
+                obstacles: game.channels[data.channel].obstacles
+            }));
+        break;
+
+        case 'obstacle':
+            //Add or remove the obstacle from the channel according to the status
+            if(data.status){
+                game.channels[data.channel].obstacles.push({
+                    'obstacle':data.obstacle
+                });
+            }else{
+                //Remove the obstacle from the channel
+                game.channels[data.channel].obstacles.forEach(function(obstacle,index){
+                    if(obstacle.obstacle==data.obstacle){
+                        game.channels[data.channel].obstacles.splice(index,1);
+                    }
+                });
+            }
+
+            //In this case, we need to send the information to all clients if belong to the same channel
+            wss.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN && client.channel==data.channel) {
+                    //Send the player array to the client
+                    client.send(JSON.stringify({
+                        request: 'obstacle_update',
+                        obstacles: game.channels[data.channel].obstacles
+                    }));
+                }
+            });
+
         break;
 
         case 'move':
@@ -82,17 +149,18 @@ wss.on('connection', function (client) {
             //In this case, we need to send the information to all clients if belong to the same channel
             wss.clients.forEach(function each(client) {
                 if (client.readyState === WebSocket.OPEN && client.channel==data.channel && client.uuid!=data.uuid) {
-                    //Send the whole array
-                    client.send(JSON.stringify({
-                        request: 'game_update',
-                        board: game.channels[data.channel]
-                    }))
+                    //Send the player array to the client
+                    game.channels[data.channel].players.forEach(function(player){
+                        if(player.uuid==data.uuid){
+                            client.send(JSON.stringify({
+                                request: 'game_update',
+                                players: [player]
+                            }));
+                        }
+                    });
                 }
             });
     }
-
-      //Show the status
-      console.log(game.channels[data.channel]);
   })
 
   //Method notifies when client disconnects
