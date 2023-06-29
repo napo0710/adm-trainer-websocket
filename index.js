@@ -60,6 +60,16 @@ wss.on('connection', function (client) {
             }
         break;
         case 'register':
+
+            //If the channel is not set, create a new one
+            if(!game.channels[data.channel]){
+                game.channels[data.channel]={
+                    'atcs': [],
+                    'players': [],
+                    'obstacles': []
+                };
+            }
+
             //Check if the channel exists
             if(game.channels[data.channel]){
                 //Store the uuid and channel to future use
